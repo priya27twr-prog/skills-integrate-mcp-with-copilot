@@ -3,6 +3,51 @@ document.addEventListener("DOMContentLoaded", () => {
   const activitySelect = document.getElementById("activity");
   const signupForm = document.getElementById("signup-form");
   const messageDiv = document.getElementById("message");
+  const loginToggleBtn = document.getElementById("login-toggle");
+  const adminLoginSection = document.getElementById("admin-login-section");
+  const adminLoginForm = document.getElementById("admin-login-form");
+  const adminLogoutBtn = document.getElementById("admin-logout");
+  const adminIdentity = document.getElementById("admin-identity");
+
+  let adminToken = localStorage.getItem("adminToken") || "";
+  let adminUser = localStorage.getItem("adminUser") || "";
+
+  const isAdmin = () => Boolean(adminToken);
+
+  function setAdmin(token, user) {
+    adminToken = token;
+    adminUser = user;
+    localStorage.setItem("adminToken", token);
+    localStorage.setItem("adminUser", user);
+    adminIdentity.textContent = `Logged in as ${user}`;
+    adminIdentity.classList.remove("hidden");
+    adminLogoutBtn.classList.remove("hidden");
+    adminLoginSection.classList.add("hidden");
+  }
+
+  function clearAdmin() {
+    adminToken = "";
+    adminUser = "";
+    localStorage.removeItem("adminToken");
+    localStorage.removeItem("adminUser");
+    adminIdentity.textContent = "";
+    adminIdentity.classList.add("hidden");
+    adminLogoutBtn.classList.add("hidden");
+  }
+
+  function updateAdminUI() {
+    if (isAdmin()) {
+      adminIdentity.textContent = `Logged in as ${adminUser}`;
+      adminIdentity.classList.remove("hidden");
+      adminLogoutBtn.classList.remove("hidden");
+      adminLoginSection.classList.add("hidden");
+      signupForm.querySelector("button[type='submit']").disabled = false;
+    } else {
+      adminIdentity.classList.add("hidden");
+      adminLogoutBtn.classList.add("hidden");
+      signupForm.querySelector("button[type='submit']").disabled = true;
+    }
+  }
 
   // Function to fetch activities from API
   async function fetchActivities() {
@@ -28,10 +73,12 @@ document.addEventListener("DOMContentLoaded", () => {
               <h5>Participants:</h5>
               <ul class="participants-list">
                 ${details.participants
-                  .map(
-                    (email) =>
-                      `<li><span class="participant-email">${email}</span><button class="delete-btn" data-activity="${name}" data-email="${email}">❌</button></li>`
-                  )
+                  .map((email) => {
+                    const deleteButton = isAdmin()
+                      ? `<button class="delete-btn" data-activity="${name}" data-email="${email}">❌</button>`
+                      : "";
+                    return `<li><span class="participant-email">${email}</span> ${deleteButton}</li>`;
+                  })
                   .join("")}
               </ul>
             </div>`
@@ -80,6 +127,9 @@ document.addEventListener("DOMContentLoaded", () => {
         )}/unregister?email=${encodeURIComponent(email)}`,
         {
           method: "DELETE",
+          headers: {
+            "Authorization": adminToken ? `Bearer ${adminToken}` : "",
+          },
         }
       );
 
@@ -117,6 +167,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const email = document.getElementById("email").value;
     const activity = document.getElementById("activity").value;
 
+    if (!isAdmin()) {
+      messageDiv.textContent = "Teacher login required to sign up students.";
+      messageDiv.className = "error";
+      messageDiv.classList.remove("hidden");
+      return;
+    }
+
     try {
       const response = await fetch(
         `/activities/${encodeURIComponent(
@@ -124,6 +181,9 @@ document.addEventListener("DOMContentLoaded", () => {
         )}/signup?email=${encodeURIComponent(email)}`,
         {
           method: "POST",
+          headers: {
+            "Authorization": adminToken ? `Bearer ${adminToken}` : "",
+          },
         }
       );
 
@@ -154,6 +214,67 @@ document.addEventListener("DOMContentLoaded", () => {
       console.error("Error signing up:", error);
     }
   });
+
+  // Admin login toggle
+  loginToggleBtn.addEventListener("click", () => {
+    adminLoginSection.classList.toggle("hidden");
+  });
+
+  adminLoginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    const username = document.getElementById("admin-username").value;
+    const password = document.getElementById("admin-password").value;
+
+    try {
+      const response = await fetch(
+        `/auth/login?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`,
+        {
+          method: "POST",
+        }
+      );
+
+      const result = await response.json();
+      if (response.ok) {
+        setAdmin(result.access_token, result.user);
+        messageDiv.textContent = "Login successful. Admin controls are enabled.";
+        messageDiv.className = "success";
+        fetchActivities();
+      } else {
+        messageDiv.textContent = result.detail || "Login failed";
+        messageDiv.className = "error";
+      }
+
+      messageDiv.classList.remove("hidden");
+      setTimeout(() => messageDiv.classList.add("hidden"), 5000);
+      updateAdminUI();
+    } catch (error) {
+      messageDiv.textContent = "Login request failed";
+      messageDiv.className = "error";
+      messageDiv.classList.remove("hidden");
+      console.error("Error logging in:", error);
+    }
+  });
+
+  adminLogoutBtn.addEventListener("click", async () => {
+    try {
+      await fetch("/auth/logout", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+    } catch (error) {
+      console.warn("Logout request failed", error);
+    }
+    clearAdmin();
+    updateAdminUI();
+    fetchActivities();
+    messageDiv.textContent = "Logged out.";
+    messageDiv.className = "success";
+    messageDiv.classList.remove("hidden");
+    setTimeout(() => messageDiv.classList.add("hidden"), 5000);
+  });
+
+  updateAdminUI();
 
   // Initialize app
   fetchActivities();
